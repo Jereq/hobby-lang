@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT
+// Copyright © 2022 Sebastian Larsson
+
+#pragma once
+
+#include <string_view>
+
+namespace hobby_lang::cmake
+{
+static constexpr std::string_view project_name = "@PROJECT_NAME@";
+static constexpr std::string_view project_version = "@PROJECT_VERSION@";
+}
