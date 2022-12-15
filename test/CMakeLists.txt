@@ -31,7 +31,17 @@ add_test(NAME cli.has_help COMMAND hobbyc --help)
 add_test(NAME cli.version_matches COMMAND hobbyc --version)
 set_tests_properties(cli.version_matches PROPERTIES PASS_REGULAR_EXPRESSION "${PROJECT_VERSION}")
 
-add_executable(tests tests.cpp)
+add_executable(tests
+        ast_tests.cpp
+        interpreter_tests.cpp
+        parser_tests.cpp
+
+        ../src/ast/ast.hpp
+        ../src/interpreter/interpreter.cpp
+        ../src/interpreter/interpreter.hpp
+        ../src/parser/parser.cpp
+        ../src/parser/parser.hpp
+        )
 target_link_libraries(tests
         PRIVATE
         hobby_lang::project_warnings

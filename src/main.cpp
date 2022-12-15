@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2022 Sebastian Larsson
 
+#include <internal_use_only/config.hpp>
+
+#include "ast/ast.hpp"
+#include "interpreter/interpreter.hpp"
+#include "parser/parser.hpp"
+
 #include <optional>
+#include <sstream>
+#include <string>
 
 #include <CLI/CLI.hpp>
 #include <spdlog/spdlog.h>
-
-#include <internal_use_only/config.hpp>
 
 
 int main(int argc, const char** argv)
@@ -27,17 +33,23 @@ try
 		return EXIT_SUCCESS;
 	}
 
-	// Use the default logger (stdout, multi-threaded, colored)
-	spdlog::info("Hello, {}!", "World");
+	std::istringstream input("def main = fun(out exitCode: i32) { exitCode = 4i32; };");
+	jereq::Program parsedProgram = jereq::parse(input, "<anonymous>");
 
-	if (message)
+	fmt::print("Types:\n");
+	for (auto const& type : parsedProgram.types)
 	{
-		fmt::print("Message: '{}'\n", *message);
+		fmt::print("  {}\n", type->rep);
 	}
-	else
+	fmt::print("Functions:\n");
+	for (auto const& func : parsedProgram.functions)
 	{
-		fmt::print("No Message Provided :(\n");
+		fmt::print("  {}: {} {}\n", func->name, func->type->rep, func->expression.rep);
 	}
+	fmt::print("Main function: {}\n", parsedProgram.mainFunction->name);
+
+	std::int32_t executionResult = jereq::execute(parsedProgram);
+	fmt::print("\nResult from execution: {}\n", executionResult);
 }
 catch (const std::exception& e)
 {
