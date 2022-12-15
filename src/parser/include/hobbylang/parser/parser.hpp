@@ -2,7 +2,7 @@
 // Copyright © 2022 Sebastian Larsson
 #pragma once
 
-#include "../ast/ast.hpp"
+#include <hobbylang/ast/ast.hpp>
 
 #include <istream>
 #include <string_view>

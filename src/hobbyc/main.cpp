@@ -3,16 +3,16 @@
 
 #include <internal_use_only/config.hpp>
 
-#include "ast/ast.hpp"
-#include "interpreter/interpreter.hpp"
-#include "parser/parser.hpp"
+#include <hobbylang/ast/ast.hpp>
+#include <hobbylang/interpreter/interpreter.hpp>
+#include <hobbylang/parser/parser.hpp>
+
+#include <CLI/CLI.hpp>
+#include <spdlog/spdlog.h>
 
 #include <optional>
 #include <sstream>
 #include <string>
-
-#include <CLI/CLI.hpp>
-#include <spdlog/spdlog.h>
 
 
 int main(int argc, const char** argv)

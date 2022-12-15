@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2022 Sebastian Larsson
 
-#include <catch2/catch_test_macros.hpp>
+#include <hobbylang/ast/ast.hpp>
+#include <hobbylang/parser/parser.hpp>
 
-#include "../src/ast/ast.hpp"
-#include "../src/parser/parser.hpp"
+#include <catch2/catch_test_macros.hpp>
 
 #include <sstream>
 

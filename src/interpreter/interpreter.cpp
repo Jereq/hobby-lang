@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2022 Sebastian Larsson
-#include "interpreter.hpp"
+#include <hobbylang/interpreter/interpreter.hpp>
 
-#include "../ast/ast.hpp"
+#include <hobbylang/ast/ast.hpp>
 
 #include <cstdint>
 #include <stdexcept>

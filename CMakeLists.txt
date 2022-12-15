@@ -41,8 +41,8 @@ add_library(project_options INTERFACE)
 add_library(project_warnings INTERFACE)
 target_compile_features(project_options INTERFACE cxx_std_${CMAKE_CXX_STANDARD})
 # TODO: The INTERFACE library NAMESPACE ALIAS are missing! CK
-add_library(hobby_lang::project_options INTERFACE IMPORTED)
-add_library(hobby_lang::project_warnings INTERFACE IMPORTED)
+add_library(hobby_lang::project_options ALIAS project_options)
+add_library(hobby_lang::project_warnings ALIAS project_warnings)
 
 # configure files based on CMake configuration options
 add_subdirectory(configured_files)

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2022 Sebastian Larsson
 
-#include <catch2/catch_test_macros.hpp>
+#include <hobbylang/ast/ast.hpp>
 
-#include "../src/ast/ast.hpp"
+#include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("AST equals operator compare equal", "[AST]")
 {
