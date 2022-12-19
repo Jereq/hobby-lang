@@ -33,7 +33,7 @@ try
 		return EXIT_SUCCESS;
 	}
 
-	std::istringstream input("def main = fun(out exitCode: i32) { exitCode = 4i32 + 1i32 + -3i32; };");
+	std::istringstream input("def main = fun(out exitCode: i32) { exitCode = 12310i32 % 100i32 / 3i32 + 2i32 * -2i32 - -7i32; };");
 	jereq::Program parsedProgram = jereq::parse(input, "<anonymous>");
 
 	fmt::print("Types:\n");

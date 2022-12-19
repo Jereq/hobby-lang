@@ -64,8 +64,18 @@ struct InitAssignment
 	std::unique_ptr<Expression> value;
 };
 
-struct Addition
+enum struct BinaryOperator
 {
+	add,
+	subtract,
+	multiply,
+	divide,
+	modulo,
+};
+
+struct BinaryOpExpression
+{
+	BinaryOperator op;
 	std::unique_ptr<Expression> lhs;
 	std::unique_ptr<Expression> rhs;
 };
@@ -73,7 +83,7 @@ struct Addition
 struct Expression
 {
 	std::string rep;// TODO: Replace
-	std::variant<Literal, InitAssignment, Addition> expr;
+	std::variant<Literal, InitAssignment, BinaryOpExpression> expr;
 };
 
 struct Function

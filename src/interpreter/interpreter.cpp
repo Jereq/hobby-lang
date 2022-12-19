@@ -57,16 +57,41 @@ struct State
 			localIt->value = expressionResult.value;
 			return { "", 0 };
 		}
-		else if (std::holds_alternative<Addition>(expr.expr))
+		else if (std::holds_alternative<BinaryOpExpression>(expr.expr))
 		{
-			auto const& addition = std::get<Addition>(expr.expr);
-			auto [lhsType, lhsValue] = evaluateExpression(frame, *addition.lhs);
-			auto [rhsType, rhsValue] = evaluateExpression(frame, *addition.rhs);
+			auto const& binaryOp = std::get<BinaryOpExpression>(expr.expr);
+			auto [lhsType, lhsValue] = evaluateExpression(frame, *binaryOp.lhs);
+			auto [rhsType, rhsValue] = evaluateExpression(frame, *binaryOp.rhs);
+
 			if (lhsType != "i32" || rhsType != "i32")
 			{
 				throw std::runtime_error("Unexpected types for addition: " + lhsType + ", " + rhsType);
 			}
-			return { lhsType, lhsValue + rhsValue };
+
+			std::int32_t result = -1;
+			switch (binaryOp.op)
+			{
+			case BinaryOperator::add:
+				result = lhsValue + rhsValue;
+				break;
+			case BinaryOperator::subtract:
+				result = lhsValue - rhsValue;
+				break;
+			case BinaryOperator::multiply:
+				result = lhsValue * rhsValue;
+				break;
+			case BinaryOperator::divide:
+				result = lhsValue / rhsValue;
+				break;
+			case BinaryOperator::modulo:
+				result = lhsValue % rhsValue;
+				break;
+			default:
+				throw std::runtime_error(
+					"Unexpected binary operator: "
+					+ std::to_string(static_cast<std::underlying_type_t<BinaryOperator>>(binaryOp.op)));
+			}
+			return { lhsType, result };
 		}
 		else
 		{

@@ -123,25 +123,47 @@ ParseTermResult parseTerm(std::string_view input)
 	return { std::move(expression), afterNumber.substr(3) };
 }
 
-std::unique_ptr<Expression> parseAddition(std::string_view input)
+BinaryOperator parseBinaryOperator(char c)
+{
+	switch (c)
+	{
+	case '+':
+		return BinaryOperator::add;
+	case '-':
+		return BinaryOperator::subtract;
+	case '*':
+		return BinaryOperator::multiply;
+	case '/':
+		return BinaryOperator::divide;
+	case '%':
+		return BinaryOperator::modulo;
+	default:
+		throw std::runtime_error("Unknown binary operator: " + std::string(1, c));
+	}
+}
+
+std::unique_ptr<Expression> parseExpressionTerms(std::string_view input)
 {
 	auto [headExpr, remainingInput] = parseTerm(input);
-	while (remainingInput.starts_with(" + "))
+	while (remainingInput.starts_with(" + ") || remainingInput.starts_with(" - ") || remainingInput.starts_with(" * ")
+		   || remainingInput.starts_with(" / ") || remainingInput.starts_with(" % "))
 	{
+		BinaryOperator const binaryOperator = parseBinaryOperator(remainingInput.at(1));
+
 		std::string_view const tail = remainingInput.substr(3);
 		auto [nextExpr, remainingTailInput] = parseTerm(tail);
 
-		std::unique_ptr<Expression> addition = std::make_unique<Expression>();
-		addition->rep = std::string_view(input.data(), remainingTailInput.data());
-		addition->expr = Addition{ std::move(headExpr), std::move(nextExpr) };
+		std::unique_ptr<Expression> binaryOpExpression = std::make_unique<Expression>();
+		binaryOpExpression->rep = std::string_view(input.data(), remainingTailInput.data());
+		binaryOpExpression->expr = BinaryOpExpression{ binaryOperator, std::move(headExpr), std::move(nextExpr) };
 
-		std::swap(headExpr, addition);
+		std::swap(headExpr, binaryOpExpression);
 		remainingInput = remainingTailInput;
 	}
 
 	if (!remainingInput.empty())
 	{
-		throw std::runtime_error("Invalid addition: " + std::string(input));
+		throw std::runtime_error("Invalid expression terms: " + std::string(input));
 	}
 
 	return std::move(headExpr);
@@ -175,7 +197,7 @@ Expression parseExpression(std::string_view input)
 
 	InitAssignment initAssignment;
 	initAssignment.var = inner.substr(0, varEnd);
-	initAssignment.value = parseAddition(valInput);
+	initAssignment.value = parseExpressionTerms(valInput);
 
 	Expression result;
 	result.rep = input;
