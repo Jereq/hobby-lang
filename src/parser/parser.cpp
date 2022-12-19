@@ -16,7 +16,7 @@ namespace jereq
 {
 std::shared_ptr<Type> findOrAddType(Program& program, std::string_view rep);
 
-FuncType parseFuncType(Program& program, std::string_view rep) // NOLINT(misc-no-recursion)
+FuncType parseFuncType(Program& program, std::string_view rep)// NOLINT(misc-no-recursion)
 {
 	FuncType funcType;
 	funcType.rep = rep.substr(3);
@@ -66,7 +66,7 @@ FuncType parseFuncType(Program& program, std::string_view rep) // NOLINT(misc-no
 	return funcType;
 }
 
-std::shared_ptr<Type> findOrAddType(Program& program, std::string_view rep) // NOLINT(misc-no-recursion)
+std::shared_ptr<Type> findOrAddType(Program& program, std::string_view rep)// NOLINT(misc-no-recursion)
 {
 	Type maybeNewType;
 	maybeNewType.rep = rep;
@@ -96,11 +96,59 @@ std::shared_ptr<Type> findOrAddType(Program& program, std::string_view rep) // N
 	return program.types.emplace_back(std::make_shared<Type>(maybeNewType));
 }
 
+struct ParseTermResult
+{
+	std::unique_ptr<Expression> expr;
+	std::string_view remainingInput;
+};
+
+ParseTermResult parseTerm(std::string_view input)
+{
+	std::int32_t value = -1;
+	auto [ptr, ec] = std::from_chars(input.data(), input.data() + input.size(), value);
+	if (ec != std::errc())
+	{
+		throw std::runtime_error("Expected number term: " + std::string(input));
+	}
+
+	std::string_view const afterNumber = input.substr(ptr - input.data());
+	if (!afterNumber.starts_with("i32"))
+	{
+		throw std::runtime_error("Expected type after value in: " + std::string(input));
+	}
+
+	std::unique_ptr<Expression> expression = std::make_unique<Expression>();
+	expression->rep = input.substr(0, ptr - input.data() + 3);
+	expression->expr = Literal{ value };
+	return { std::move(expression), afterNumber.substr(3) };
+}
+
+std::unique_ptr<Expression> parseAddition(std::string_view input)
+{
+	auto [headExpr, remainingInput] = parseTerm(input);
+	while (remainingInput.starts_with(" + "))
+	{
+		std::string_view const tail = remainingInput.substr(3);
+		auto [nextExpr, remainingTailInput] = parseTerm(tail);
+
+		std::unique_ptr<Expression> addition = std::make_unique<Expression>();
+		addition->rep = std::string_view(input.data(), remainingTailInput.data());
+		addition->expr = Addition{ std::move(headExpr), std::move(nextExpr) };
+
+		std::swap(headExpr, addition);
+		remainingInput = remainingTailInput;
+	}
+
+	if (!remainingInput.empty())
+	{
+		throw std::runtime_error("Invalid addition: " + std::string(input));
+	}
+
+	return std::move(headExpr);
+}
+
 Expression parseExpression(std::string_view input)
 {
-	Expression result;
-	result.rep = input;
-
 	if (input.size() < 5 || !input.starts_with("{ ") || !input.ends_with(" }"))
 	{
 		throw std::runtime_error("I don't understand this expression: " + std::string(input));
@@ -119,24 +167,19 @@ Expression parseExpression(std::string_view input)
 	}
 
 	auto valStart = varEnd + 3;
-	if (!inner.ends_with("i32;"))
+	if (!inner.ends_with(';'))
 	{
-		throw std::runtime_error("Expected type after value in: " + std::string(inner));
+		throw std::runtime_error("Expression should end with ';': " + std::string(inner));
 	}
-
-	std::string_view const valStr = inner.substr(valStart, inner.size() - valStart - 4);
-	std::int32_t value;
-	auto [ptr, ec] = std::from_chars(valStr.data(), valStr.data() + valStr.size(), value);
-
-	if (ptr != valStr.data() + valStr.size() || ec != std::errc())
-	{
-		throw std::runtime_error("Failed to read value in: " + std::string(inner));
-	}
+	std::string_view const valInput = inner.substr(valStart, inner.size() - valStart - 1);
 
 	InitAssignment initAssignment;
 	initAssignment.var = inner.substr(0, varEnd);
-	initAssignment.value = value;
-	result.expr = initAssignment;
+	initAssignment.value = parseAddition(valInput);
+
+	Expression result;
+	result.rep = input;
+	result.expr = std::move(initAssignment);
 
 	return result;
 }

@@ -21,11 +21,14 @@ TEST_CASE("Interpreter should execute minimal AST", "[interpreter]")
 	mainFuncType->t = funcType;
 	program.types.emplace_back(mainFuncType);
 
+	auto literalExpression = std::make_unique<jereq::Expression>();
+	literalExpression->expr = jereq::Literal{ 0 };
+
 	std::shared_ptr<jereq::Function> const& mainFunc = std::make_shared<jereq::Function>();
 	mainFunc->name = "main";
 	mainFunc->sourceFile = "test case";
 	mainFunc->type = mainFuncType;
-	mainFunc->expression.expr = jereq::InitAssignment{ "exitCode", 0 };
+	mainFunc->expression.expr = jereq::InitAssignment{ "exitCode", std::move(literalExpression) };
 	program.functions.emplace_back(mainFunc);
 	program.mainFunction = mainFunc;
 

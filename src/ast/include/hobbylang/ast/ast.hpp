@@ -51,16 +51,29 @@ struct Type
 	friend bool operator==(Type const& lhs, Type const& rhs) noexcept = default;
 };
 
+struct Expression;
+
+struct Literal
+{
+	std::int32_t value;
+};
+
 struct InitAssignment
 {
 	std::string var;
-	std::int32_t value;// TODO: Replace
+	std::unique_ptr<Expression> value;
+};
+
+struct Addition
+{
+	std::unique_ptr<Expression> lhs;
+	std::unique_ptr<Expression> rhs;
 };
 
 struct Expression
 {
 	std::string rep;// TODO: Replace
-	std::variant<InitAssignment> expr;
+	std::variant<Literal, InitAssignment, Addition> expr;
 };
 
 struct Function

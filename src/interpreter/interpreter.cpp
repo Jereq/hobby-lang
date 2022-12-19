@@ -4,6 +4,7 @@
 
 #include <hobbylang/ast/ast.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -14,6 +15,7 @@ namespace jereq
 {
 struct Local
 {
+	std::string name;
 	std::int32_t value;
 };
 
@@ -22,10 +24,60 @@ struct Frame
 	std::vector<Local> locals;
 };
 
+struct ExpressionResult
+{
+	std::string type;// TODO: Replace
+	std::int32_t value;
+};
+
 struct State
 {
-	void executeFunction(Function const& func, std::vector<Local*> args)
+	ExpressionResult evaluateExpression(Frame& frame, Expression const& expr)// NOLINT(misc-no-recursion)
 	{
+		if (std::holds_alternative<Literal>(expr.expr))
+		{
+			auto const& literal = std::get<Literal>(expr.expr);
+			return { "i32", literal.value };
+		}
+		else if (std::holds_alternative<InitAssignment>(expr.expr))
+		{
+			auto const& initAssignment = std::get<InitAssignment>(expr.expr);
+			auto localIt
+				= std::ranges::find(frame.locals, initAssignment.var, [](Local const& local) { return local.name; });
+			if (localIt == frame.locals.end())
+			{
+				throw std::runtime_error("Undeclared variable: " + initAssignment.var);
+			}
+
+			ExpressionResult const& expressionResult = evaluateExpression(frame, *initAssignment.value);
+			if (expressionResult.type != "i32")
+			{
+				throw std::runtime_error("Unexpected expression result type: " + expressionResult.type);
+			}
+			localIt->value = expressionResult.value;
+			return { "", 0 };
+		}
+		else if (std::holds_alternative<Addition>(expr.expr))
+		{
+			auto const& addition = std::get<Addition>(expr.expr);
+			auto [lhsType, lhsValue] = evaluateExpression(frame, *addition.lhs);
+			auto [rhsType, rhsValue] = evaluateExpression(frame, *addition.rhs);
+			if (lhsType != "i32" || rhsType != "i32")
+			{
+				throw std::runtime_error("Unexpected types for addition: " + lhsType + ", " + rhsType);
+			}
+			return { lhsType, lhsValue + rhsValue };
+		}
+		else
+		{
+			throw std::runtime_error("Unsupported expression: " + expr.rep);
+		}
+	}
+
+	void executeFunction(Function const& func, std::vector<Local*> const& args)
+	{
+		Frame frame;
+
 		auto const& funcType = std::get<FuncType>(func.type->t);
 		if (funcType.parameters.size() != 1)
 		{
@@ -46,17 +98,16 @@ struct State
 			throw std::runtime_error("Only i32 support is implemented: " + funcType.rep);
 		}
 
-		if (!std::holds_alternative<InitAssignment>(func.expression.expr))
+		Local& local = frame.locals.emplace_back();
+		local.name = funcParam.name;
+
+		auto [exprType, _] = evaluateExpression(frame, func.expression);
+		if (!exprType.empty())
 		{
-			throw std::runtime_error("Unsupported expression: " + func.expression.rep);
+			throw std::runtime_error("Function expression should not return a value");
 		}
 
-		auto const& initAssignment = std::get<InitAssignment>(func.expression.expr);
-		if (initAssignment.var != funcParam.name)
-		{
-			throw std::runtime_error("Undeclared variable: " + initAssignment.var);
-		}
-		args.at(0)->value = initAssignment.value;
+		args.at(0)->value = frame.locals.at(0).value;
 	}
 };
 
