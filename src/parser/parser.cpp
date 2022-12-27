@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <utility>
 #include <variant>
 
 namespace jereq
@@ -234,6 +236,154 @@ bool isMainFuncType(Type const& type)
 	return std::get<BuiltInType>(paramType.t).name == "i32";
 }
 
+std::pair<bool, std::string_view> parseLiteral(std::string_view input, std::string_view literal)
+{
+	if (input.starts_with(literal))
+	{
+		return { true, input.substr(literal.size()) };
+	}
+	else
+	{
+		return { false, {} };
+	}
+}
+
+std::pair<bool, std::string_view> parseWhitespace(std::string_view input)
+{
+	auto firstNotWhitespace = input.find_first_not_of(" \t\n");
+	if (firstNotWhitespace == 0)
+	{
+		return { false, {} };
+	}
+	else
+	{
+		return { true, input.substr(firstNotWhitespace) };
+	}
+}
+
+std::string_view skipWhitespace(std::string_view input)
+{
+	auto firstNotWhitespace = input.find_first_not_of(" \t\n");
+	return input.substr(firstNotWhitespace);
+}
+
+std::tuple<bool, std::string_view, std::string_view> parseIdentifier(std::string_view input)
+{
+	// TODO: Too strict. Replace with black list?
+	auto firstNotIdentifierCharIt = std::ranges::find_if_not(
+		input, [](char letter) { return ('a' <= letter && letter <= 'z') || ('A' <= letter && letter <= 'Z'); });
+	if (firstNotIdentifierCharIt == input.begin())
+	{
+		return { false, {}, {} };
+	}
+	else
+	{
+		auto identifierLength = std::distance(input.begin(), firstNotIdentifierCharIt);
+		return { true, input.substr(0, identifierLength), input.substr(identifierLength) };
+	}
+}
+
+std::tuple<bool, std::shared_ptr<Type>, std::string_view> parseType(std::string_view input, Program& program)
+{
+	if (!input.starts_with("fun("))
+	{
+		throw std::runtime_error("Non-function types not implemented");
+	}
+
+	auto funcTypeEnd = input.find(')');
+	if (funcTypeEnd == std::string_view::npos)
+	{
+		return { false, {}, {} };
+	}
+	funcTypeEnd += 1;
+
+	std::shared_ptr<Type> const& type = findOrAddType(program, input.substr(0, funcTypeEnd));
+	return { true, type, input.substr(funcTypeEnd) };
+}
+
+std::tuple<bool, Expression, std::string_view> parseFunctionBody(std::string_view input)
+{
+	if (!input.starts_with('{'))
+	{
+		throw std::runtime_error("Missing func body start in: " + std::string(input));
+	}
+
+	auto funcBodyEnd = input.find('}', 1);
+	if (funcBodyEnd == std::string::npos)
+	{
+		throw std::runtime_error("Missing func body end in: " + std::string(input));
+	}
+	funcBodyEnd += 1;
+
+	Expression expr = parseExpression(input.substr(0, funcBodyEnd));
+	return { true, std::move(expr), input.substr(funcBodyEnd) };
+}
+
+void parseLine(Program& program, std::string_view line, std::string_view sourceFileName)
+{
+	auto lineWRemInput = skipWhitespace(line);
+	auto [defOk, defRemInput] = parseLiteral(lineWRemInput, "def");
+	auto [defWOk, defWRemInput] = parseWhitespace(defRemInput);
+	if (!defOk || !defWOk)
+	{
+		throw std::runtime_error("Invalid syntax in: " + std::string(line));
+	}
+
+	auto [identifierOk, identifier, identifierRemInput] = parseIdentifier(defWRemInput);
+	if (!identifierOk)
+	{
+		throw std::runtime_error("Missing name after def in: " + std::string(line));
+	}
+	auto identifierWRemInput = skipWhitespace(identifierRemInput);
+
+	auto [assignmentOk, assignmentRemInput] = parseLiteral(identifierWRemInput, "=");
+	if (!assignmentOk)
+	{
+		throw std::runtime_error("Missing assignment in def: " + std::string(line));
+	}
+	auto assignmentWRemInput = skipWhitespace(assignmentRemInput);
+
+	auto [typeOk, type, typeRemInput] = parseType(assignmentWRemInput, program);
+	if (!typeOk)
+	{
+		throw std::runtime_error("Unable to parse type: " + std::string(line));
+	}
+	auto typeWRemInput = skipWhitespace(typeRemInput);
+
+	auto [funcBodyOk, funcExpr, funcBodyRemInput] = parseFunctionBody(typeWRemInput);
+	if (!funcBodyOk)
+	{
+		throw std::runtime_error("Failed to parse function body: " + std::string(line));
+	}
+	auto funcBodyWRemInput = skipWhitespace(funcBodyRemInput);
+
+	if (funcBodyWRemInput != ";")
+	{
+		throw std::runtime_error("Invalid def end in: " + std::string(line));
+	}
+
+	std::shared_ptr<Function> const& mainFunc = program.functions.emplace_back(std::make_shared<Function>());
+	mainFunc->name = identifier;
+	mainFunc->sourceFile = sourceFileName;
+	mainFunc->type = type;
+	mainFunc->expression = std::move(funcExpr);
+
+	if (mainFunc->name == "main")
+	{
+		if (!isMainFuncType(*mainFunc->type))
+		{
+			throw std::runtime_error("Wrong type for main");
+		}
+
+		if (program.mainFunction)
+		{
+			throw std::runtime_error("Multiple main functions found");
+		}
+
+		program.mainFunction = mainFunc;
+	}
+}
+
 Program parse(std::istream& input, std::string_view name)
 {
 	Program program;
@@ -241,78 +391,7 @@ Program parse(std::istream& input, std::string_view name)
 	std::string line;
 	while (std::getline(input, line))
 	{
-		if (line.starts_with("def "))
-		{
-			auto nameStart = line.find_first_not_of(' ', 4);
-			if (nameStart == std::string::npos)
-			{
-				throw std::runtime_error("Missing name after def in: " + line);
-			}
-
-			auto nameEnd = line.find(' ', nameStart + 1);
-			if (nameEnd == std::string::npos)
-			{
-				throw std::runtime_error("Missing end to name in: " + line);
-			}
-
-			if (line.substr(nameEnd, 3) != " = ")
-			{
-				throw std::runtime_error("Missing assignment in def: " + line);
-			}
-
-			auto typeStart = nameEnd + 3;
-			auto funcTypeEnd = line.find(')', typeStart);
-			if (funcTypeEnd == std::string::npos)
-			{
-				throw std::runtime_error("Missing func type end in: " + line);
-			}
-			funcTypeEnd += 1;
-
-			auto funcBodyStart = line.find('{', funcTypeEnd + 1);
-			if (funcBodyStart == std::string::npos)
-			{
-				throw std::runtime_error("Missing func body start in: " + line);
-			}
-
-			auto funcBodyEnd = line.find('}', funcBodyStart + 1);
-			if (funcBodyEnd == std::string::npos)
-			{
-				throw std::runtime_error("Missing func body end in: " + line);
-			}
-			funcBodyEnd += 1;
-
-			if (line.substr(funcBodyEnd) != ";")
-			{
-				throw std::runtime_error("Invalid def end in: " + line);
-			}
-
-			std::shared_ptr<Type> const& type = findOrAddType(program, line.substr(typeStart, funcTypeEnd - typeStart));
-
-			std::shared_ptr<Function> const& mainFunc = program.functions.emplace_back(std::make_shared<Function>());
-			mainFunc->name = line.substr(nameStart, nameEnd - nameStart);
-			mainFunc->sourceFile = name;
-			mainFunc->type = type;
-			mainFunc->expression = parseExpression(line.substr(funcBodyStart, funcBodyEnd - funcBodyStart));
-
-			if (mainFunc->name == "main")
-			{
-				if (!isMainFuncType(*mainFunc->type))
-				{
-					throw std::runtime_error("Wrong type for main");
-				}
-
-				if (program.mainFunction)
-				{
-					throw std::runtime_error("Multiple main functions found");
-				}
-
-				program.mainFunction = mainFunc;
-			}
-		}
-		else
-		{
-			throw std::runtime_error("Invalid syntax in: " + line);
-		}
+		parseLine(program, line, name);
 	}
 
 	if (!program.mainFunction)
