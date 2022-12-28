@@ -4,6 +4,9 @@
 
 #include <hobbylang/ast/ast.hpp>
 
+#include <fmt/core.h>
+
+#include <algorithm>
 #include <charconv>
 #include <istream>
 #include <memory>
@@ -83,7 +86,7 @@ std::shared_ptr<Type> findOrAddType(Program& program, std::string_view rep)// NO
 	}
 	else
 	{
-		throw std::runtime_error("Type not implemented: " + std::string(rep));
+		throw std::runtime_error(fmt::format("Type not implemented: {}", rep));
 	}
 
 
@@ -110,13 +113,13 @@ ParseTermResult parseTerm(std::string_view input)
 	auto [ptr, ec] = std::from_chars(input.data(), input.data() + input.size(), value);
 	if (ec != std::errc())
 	{
-		throw std::runtime_error("Expected number term: " + std::string(input));
+		throw std::runtime_error(fmt::format("Expected number term: {}", input));
 	}
 
 	std::string_view const afterNumber = input.substr(ptr - input.data());
 	if (!afterNumber.starts_with("i32"))
 	{
-		throw std::runtime_error("Expected type after value in: " + std::string(input));
+		throw std::runtime_error(fmt::format("Expected type after value in: {}", input));
 	}
 
 	std::unique_ptr<Expression> expression = std::make_unique<Expression>();
@@ -140,7 +143,7 @@ BinaryOperator parseBinaryOperator(char c)
 	case '%':
 		return BinaryOperator::modulo;
 	default:
-		throw std::runtime_error("Unknown binary operator: " + std::string(1, c));
+		throw std::runtime_error(fmt::format("Unknown binary operator: {}", c));
 	}
 }
 
@@ -165,7 +168,7 @@ std::unique_ptr<Expression> parseExpressionTerms(std::string_view input)
 
 	if (!remainingInput.empty())
 	{
-		throw std::runtime_error("Invalid expression terms: " + std::string(input));
+		throw std::runtime_error(fmt::format("Invalid expression terms: {}", input));
 	}
 
 	return std::move(headExpr);
@@ -175,25 +178,25 @@ Expression parseExpression(std::string_view input)
 {
 	if (input.size() < 5 || !input.starts_with("{ ") || !input.ends_with(" }"))
 	{
-		throw std::runtime_error("I don't understand this expression: " + std::string(input));
+		throw std::runtime_error(fmt::format("I don't understand this expression: {}", input));
 	}
 
 	std::string_view const inner = input.substr(2, input.size() - 4);
 	auto varEnd = inner.find(' ');
 	if (varEnd == std::string_view::npos)
 	{
-		throw std::runtime_error("Missing space after var name in: " + std::string(inner));
+		throw std::runtime_error(fmt::format("Missing space after var name in: {}", inner));
 	}
 
 	if (inner.size() < varEnd + 3 || inner.substr(varEnd, 3) != " = ")
 	{
-		throw std::runtime_error("Expected assignment in: " + std::string(inner));
+		throw std::runtime_error(fmt::format("Expected assignment in: {}", inner));
 	}
 
 	auto valStart = varEnd + 3;
 	if (!inner.ends_with(';'))
 	{
-		throw std::runtime_error("Expression should end with ';': " + std::string(inner));
+		throw std::runtime_error(fmt::format("Expression should end with ';': {}", inner));
 	}
 	std::string_view const valInput = inner.substr(valStart, inner.size() - valStart - 1);
 
@@ -305,13 +308,13 @@ std::tuple<bool, Expression, std::string_view> parseFunctionBody(std::string_vie
 {
 	if (!input.starts_with('{'))
 	{
-		throw std::runtime_error("Missing func body start in: " + std::string(input));
+		throw std::runtime_error(fmt::format("Missing func body start in: {}", input));
 	}
 
 	auto funcBodyEnd = input.find('}', 1);
 	if (funcBodyEnd == std::string::npos)
 	{
-		throw std::runtime_error("Missing func body end in: " + std::string(input));
+		throw std::runtime_error(fmt::format("Missing func body end in: {}", input));
 	}
 	funcBodyEnd += 1;
 
@@ -319,48 +322,110 @@ std::tuple<bool, Expression, std::string_view> parseFunctionBody(std::string_vie
 	return { true, std::move(expr), input.substr(funcBodyEnd) };
 }
 
-void parseLine(Program& program, std::string_view line, std::string_view sourceFileName)
+struct Location
 {
-	auto lineWRemInput = skipWhitespace(line);
+	std::size_t lineNumber;
+	std::size_t columnNumber;
+	std::size_t byteOffset;
+};
+
+Location locate(std::string_view substring, std::string_view original)
+{
+	char const* substringStart = substring.data();
+	char const* originalStart = original.data();
+	if (substringStart < originalStart || originalStart + original.size() < substringStart)
+	{
+		throw std::runtime_error("locate can only be used on substrings of the original string");
+	}
+
+	std::basic_string_view<char> const& originalBeforeSubstring
+		= std::string_view(originalStart, std::distance(originalStart, substringStart));
+
+	Location result = {};
+	result.lineNumber = std::ranges::count(originalBeforeSubstring, '\n') + 1;
+	if (result.lineNumber == 1)
+	{
+		result.columnNumber = originalBeforeSubstring.size() + 1;
+	}
+	else
+	{
+		auto lastLineBreak = originalBeforeSubstring.rfind('\n');
+		result.columnNumber = originalBeforeSubstring.size() - lastLineBreak;
+	}
+	result.byteOffset = originalBeforeSubstring.size();
+	return result;
+}
+
+std::string_view getLine(std::string_view substring, std::string_view original)
+{
+	auto location = locate(substring, original);
+	auto nextLineBreak = original.find('\n', location.byteOffset);
+	if (nextLineBreak == std::string_view::npos)
+	{
+		return original.substr(location.byteOffset);
+	}
+	else
+	{
+		return original.substr(location.byteOffset, nextLineBreak);
+	}
+}
+
+[[noreturn]] void unrecoverableError(std::string_view description,
+	std::string_view errorSubstring,
+	std::string_view fullInput,
+	std::string_view sourceFileName)
+{
+	auto location = locate(errorSubstring, fullInput);
+	throw std::runtime_error(
+		fmt::format("{}({}:{}): {}", sourceFileName, location.lineNumber, location.columnNumber, description));
+}
+
+std::pair<bool, std::string_view> parseDefinition(std::string_view input,
+	Program& program,
+	std::string_view fullInput,
+	std::string_view sourceFileName)
+{
+	auto lineWRemInput = skipWhitespace(input);
 	auto [defOk, defRemInput] = parseLiteral(lineWRemInput, "def");
 	auto [defWOk, defWRemInput] = parseWhitespace(defRemInput);
 	if (!defOk || !defWOk)
 	{
-		throw std::runtime_error("Invalid syntax in: " + std::string(line));
+		unrecoverableError("Invalid syntax", input, fullInput, sourceFileName);
 	}
 
 	auto [identifierOk, identifier, identifierRemInput] = parseIdentifier(defWRemInput);
 	if (!identifierOk)
 	{
-		throw std::runtime_error("Missing name after def in: " + std::string(line));
+		unrecoverableError("Missing name after def", defWRemInput, fullInput, sourceFileName);
 	}
 	auto identifierWRemInput = skipWhitespace(identifierRemInput);
 
 	auto [assignmentOk, assignmentRemInput] = parseLiteral(identifierWRemInput, "=");
 	if (!assignmentOk)
 	{
-		throw std::runtime_error("Missing assignment in def: " + std::string(line));
+		unrecoverableError("Missing assignment in def", identifierWRemInput, fullInput, sourceFileName);
 	}
 	auto assignmentWRemInput = skipWhitespace(assignmentRemInput);
 
 	auto [typeOk, type, typeRemInput] = parseType(assignmentWRemInput, program);
 	if (!typeOk)
 	{
-		throw std::runtime_error("Unable to parse type: " + std::string(line));
+		unrecoverableError("Unable to parse type", assignmentWRemInput, input, sourceFileName);
 	}
 	auto typeWRemInput = skipWhitespace(typeRemInput);
 
 	auto [funcBodyOk, funcExpr, funcBodyRemInput] = parseFunctionBody(typeWRemInput);
 	if (!funcBodyOk)
 	{
-		throw std::runtime_error("Failed to parse function body: " + std::string(line));
+		unrecoverableError("Failed to parse function body", typeWRemInput, fullInput, sourceFileName);
 	}
 	auto funcBodyWRemInput = skipWhitespace(funcBodyRemInput);
 
-	if (funcBodyWRemInput != ";" && funcBodyWRemInput != ";\n")
+	if (!funcBodyWRemInput.starts_with(';'))
 	{
-		throw std::runtime_error("Invalid def end in: " + std::string(line));
+		unrecoverableError("Invalid def end", funcBodyWRemInput, fullInput, sourceFileName);
 	}
+	auto remainingInput = funcBodyWRemInput.substr(1);
 
 	std::shared_ptr<Function> const& mainFunc = program.functions.emplace_back(std::make_shared<Function>());
 	mainFunc->name = identifier;
@@ -372,26 +437,33 @@ void parseLine(Program& program, std::string_view line, std::string_view sourceF
 	{
 		if (!isMainFuncType(*mainFunc->type))
 		{
-			throw std::runtime_error("Wrong type for main");
+			unrecoverableError("Wrong type for main", assignmentWRemInput, fullInput, sourceFileName);
 		}
 
 		if (program.mainFunction)
 		{
-			throw std::runtime_error("Multiple main functions found");
+			unrecoverableError("Multiple main functions found", identifier, fullInput, sourceFileName);
 		}
 
 		program.mainFunction = mainFunc;
 	}
+
+	return { true, remainingInput };
 }
 
-Program parse(std::istream& input, std::string_view name)
+Program parse(std::string_view input, std::string_view name)
 {
 	Program program;
 
-	std::string line;
-	while (std::getline(input, line))
+	std::string_view remainingInput = input;
+	while (!remainingInput.empty())
 	{
-		parseLine(program, line, name);
+		auto [ok, remaining] = parseDefinition(remainingInput, program, input, name);
+		if (!ok)
+		{
+			unrecoverableError("Failed to parse definition", remainingInput, input, name);
+		}
+		remainingInput = remaining;
 	}
 
 	if (!program.mainFunction)
@@ -400,5 +472,19 @@ Program parse(std::istream& input, std::string_view name)
 	}
 
 	return program;
+}
+
+Program parse(std::istream& input, std::string_view name)
+{
+	auto fpos = input.tellg();
+	input.seekg(0, std::istream::end);
+	auto inputSize = input.tellg() - fpos;
+	input.seekg(fpos);
+
+	std::string inputContent;
+	inputContent.resize(inputSize);
+	input.read(inputContent.data(), inputSize);
+
+	return parse(inputContent, name);
 }
 }

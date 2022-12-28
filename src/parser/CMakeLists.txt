@@ -14,4 +14,5 @@ target_link_libraries(
         hobby_lang::project_options
         hobby_lang::project_warnings
         ast
+        fmt::fmt
 )

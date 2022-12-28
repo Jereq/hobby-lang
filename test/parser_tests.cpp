@@ -6,11 +6,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <sstream>
+#include <string_view>
 
 TEST_CASE("Parser should handle minimal program", "[parser]")
 {
-	std::istringstream input("def main = fun(out exitCode: i32) { exitCode = 0i32; };");
+	std::string_view const input = "def main = fun(out exitCode: i32) { exitCode = 0i32; };";
 	jereq::Program program = jereq::parse(input, "test name");
 
 	REQUIRE(program.types.size() == 2);
