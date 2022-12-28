@@ -254,7 +254,7 @@ std::pair<bool, std::string_view> parseLiteral(std::string_view input, std::stri
 std::pair<bool, std::string_view> parseWhitespace(std::string_view input)
 {
 	auto firstNotWhitespace = input.find_first_not_of(" \t\n");
-	if (firstNotWhitespace == 0)
+	if (firstNotWhitespace == 0 || firstNotWhitespace == std::string_view::npos)
 	{
 		return { false, {} };
 	}
@@ -267,7 +267,14 @@ std::pair<bool, std::string_view> parseWhitespace(std::string_view input)
 std::string_view skipWhitespace(std::string_view input)
 {
 	auto firstNotWhitespace = input.find_first_not_of(" \t\n");
-	return input.substr(firstNotWhitespace);
+	if (firstNotWhitespace == std::string_view::npos)
+	{
+		return input.substr(input.size());
+	}
+	else
+	{
+		return input.substr(firstNotWhitespace);
+	}
 }
 
 std::tuple<bool, std::string_view, std::string_view> parseIdentifier(std::string_view input)
@@ -425,7 +432,7 @@ std::pair<bool, std::string_view> parseDefinition(std::string_view input,
 	{
 		unrecoverableError("Invalid def end", funcBodyWRemInput, fullInput, sourceFileName);
 	}
-	auto remainingInput = funcBodyWRemInput.substr(1);
+	auto remainingInput = skipWhitespace(funcBodyWRemInput.substr(1));
 
 	std::shared_ptr<Function> const& mainFunc = program.functions.emplace_back(std::make_shared<Function>());
 	mainFunc->name = identifier;
