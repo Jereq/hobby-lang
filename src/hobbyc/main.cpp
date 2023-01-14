@@ -21,18 +21,11 @@ try
 {
 	CLI::App app{ fmt::format("{} version {}", hobby_lang::cmake::project_name, hobby_lang::cmake::project_version) };
 
-	bool show_version = false;
-	app.add_flag("--version", show_version, "Show version information");
+	app.set_version_flag("-v,--version", std::string(hobby_lang::cmake::project_version));
 	bool execute = false;
 	app.add_flag("-x,--execute", execute, "Execute the program instead of generating a compiled output");
 
 	CLI11_PARSE(app, argc, argv)
-
-	if (show_version)
-	{
-		fmt::print("{}\n", hobby_lang::cmake::project_version);
-		return EXIT_SUCCESS;
-	}
 
 	if (!execute)
 	{
