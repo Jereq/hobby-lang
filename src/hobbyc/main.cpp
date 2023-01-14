@@ -11,9 +11,11 @@
 #include <spdlog/spdlog.h>
 
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <optional>
-#include <sstream>
 #include <string>
+#include <vector>
 
 
 int main(int argc, const char** argv)
@@ -25,6 +27,9 @@ try
 	bool execute = false;
 	app.add_flag("-x,--execute", execute, "Execute the program instead of generating a compiled output");
 
+	std::vector<std::filesystem::path> inputFiles;
+	app.add_option("files", inputFiles, "Input files")->check(CLI::ExistingFile);
+
 	CLI11_PARSE(app, argc, argv)
 
 	if (!execute)
@@ -33,8 +38,21 @@ try
 		return EXIT_FAILURE;
 	}
 
-	std::istringstream input("def main = fun(out exitCode: i32) { exitCode = 12310i32 % 100i32 / 3i32 + 2i32 * -2i32 - -7i32; };");
-	jereq::Program parsedProgram = jereq::parse(input, "<anonymous>");
+	if (inputFiles.empty())
+	{
+		fmt::print("Missing input files.\n");
+		return EXIT_FAILURE;
+	}
+
+	if (inputFiles.size() > 1)
+	{
+		fmt::print("Multiple input files not implemented.\n");
+		return EXIT_FAILURE;
+	}
+
+	auto absPath = std::filesystem::absolute(inputFiles.at(0));
+	std::ifstream input(absPath, std::ifstream::binary);
+	jereq::Program parsedProgram = jereq::parse(input, absPath.string());
 
 	fmt::print("Types:\n");
 	for (auto const& type : parsedProgram.types)

@@ -357,7 +357,7 @@ void parseLine(Program& program, std::string_view line, std::string_view sourceF
 	}
 	auto funcBodyWRemInput = skipWhitespace(funcBodyRemInput);
 
-	if (funcBodyWRemInput != ";")
+	if (funcBodyWRemInput != ";" && funcBodyWRemInput != ";\n")
 	{
 		throw std::runtime_error("Invalid def end in: " + std::string(line));
 	}
