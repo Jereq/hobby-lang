@@ -10,6 +10,7 @@
 #include <CLI/CLI.hpp>
 #include <spdlog/spdlog.h>
 
+#include <cstdlib>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -20,10 +21,10 @@ try
 {
 	CLI::App app{ fmt::format("{} version {}", hobby_lang::cmake::project_name, hobby_lang::cmake::project_version) };
 
-	std::optional<std::string> message;
-	app.add_option("-m,--message", message, "A message to print back out");
 	bool show_version = false;
 	app.add_flag("--version", show_version, "Show version information");
+	bool execute = false;
+	app.add_flag("-x,--execute", execute, "Execute the program instead of generating a compiled output");
 
 	CLI11_PARSE(app, argc, argv)
 
@@ -31,6 +32,12 @@ try
 	{
 		fmt::print("{}\n", hobby_lang::cmake::project_version);
 		return EXIT_SUCCESS;
+	}
+
+	if (!execute)
+	{
+		fmt::print("Compiling program not implemented, use --execute to execute the program.\n");
+		return EXIT_FAILURE;
 	}
 
 	std::istringstream input("def main = fun(out exitCode: i32) { exitCode = 12310i32 % 100i32 / 3i32 + 2i32 * -2i32 - -7i32; };");
@@ -50,6 +57,8 @@ try
 
 	std::int32_t executionResult = jereq::execute(parsedProgram);
 	fmt::print("\nResult from execution: {}\n", executionResult);
+
+	return EXIT_SUCCESS;
 }
 catch (const std::exception& e)
 {
