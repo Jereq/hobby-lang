@@ -24,6 +24,9 @@ try
 {
 	CLI::App app{ fmt::format("{} version {}", hobby_lang::cmake::project_name, hobby_lang::cmake::project_version) };
 
+	std::filesystem::path outputPath{ "a.wasm" };
+	app.add_option("-o,--output", outputPath, "Path where to put the compiled output. Defaults to a.wasm.")
+		->option_text("FILE");
 	app.set_version_flag("-v,--version", std::string(hobby_lang::cmake::project_version));
 	bool execute = false;
 	app.add_flag("-x,--execute", execute, "Execute the program instead of generating a compiled output");
@@ -68,14 +71,14 @@ try
 	}
 	else
 	{
-		std::ofstream output("a.wasm", std::ofstream::binary);
+		std::ofstream output(outputPath, std::ofstream::binary);
 		if (jereq::compile(parsedProgram, output))
 		{
-			spdlog::info("Successfully compile program: a.wasm");
+			spdlog::info("Successfully compiled program: {}", outputPath.string());
 		}
 		else
 		{
-			spdlog::error("Failed to compile program: a.wasm");
+			spdlog::error("Failed to compile program: {}", outputPath.string());
 		}
 	}
 
