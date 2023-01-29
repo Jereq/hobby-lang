@@ -1,7 +1,7 @@
 AccessModifierOffset: -4
 AlignAfterOpenBracket: DontAlign
-AlignConsecutiveAssignments: false
-AlignConsecutiveDeclarations: false
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
 AlignEscapedNewlines: DontAlign
 AlignOperands: true
 AlignTrailingComments: false
@@ -66,6 +66,7 @@ IncludeIsMainRegex: (Test)?$
 IndentCaseLabels: false
 IndentWidth: 4
 IndentWrappedFunctionNames: true
+InsertNewlineAtEOF: true
 JavaScriptQuotes: Leave
 JavaScriptWrapImports: true
 KeepEmptyLinesAtTheStartOfBlocks: true
