@@ -6,6 +6,7 @@
 #include <hobbylang/ast/ast.hpp>
 #include <hobbylang/interpreter/interpreter.hpp>
 #include <hobbylang/parser/parser.hpp>
+#include <hobbylang/wasm/wasm.hpp>
 
 #include <CLI/CLI.hpp>
 #include <spdlog/spdlog.h>
@@ -31,12 +32,6 @@ try
 	app.add_option("files", inputFiles, "Input files")->check(CLI::ExistingFile);
 
 	CLI11_PARSE(app, argc, argv)
-
-	if (!execute)
-	{
-		fmt::print("Compiling program not implemented, use --execute to execute the program.\n");
-		return EXIT_FAILURE;
-	}
 
 	if (inputFiles.empty())
 	{
@@ -66,8 +61,23 @@ try
 	}
 	fmt::print("Main function: {}\n", parsedProgram.mainFunction->name);
 
-	std::int32_t executionResult = jereq::execute(parsedProgram);
-	fmt::print("\nResult from execution: {}\n", executionResult);
+	if (execute)
+	{
+		std::int32_t executionResult = jereq::execute(parsedProgram);
+		fmt::print("\nResult from execution: {}\n", executionResult);
+	}
+	else
+	{
+		std::ofstream output("a.wasm", std::ofstream::binary);
+		if (jereq::compile(parsedProgram, output))
+		{
+			spdlog::info("Successfully compile program: a.wasm");
+		}
+		else
+		{
+			spdlog::error("Failed to compile program: a.wasm");
+		}
+	}
 
 	return EXIT_SUCCESS;
 }

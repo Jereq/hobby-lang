@@ -10,6 +10,7 @@ target_link_libraries(
         ast
         interpreter
         parser
+        wasm
         CLI11::CLI11
         fmt::fmt
         spdlog::spdlog
