@@ -60,7 +60,7 @@ try
 	fmt::print("Functions:\n");
 	for (auto const& func : parsedProgram.functions)
 	{
-		fmt::print("  {}: {} {}\n", func->name, func->type->rep, func->expression.rep);
+		fmt::print("  {}: {} {{ {} }}\n", func->name, func->type->rep, func->expression.rep);
 	}
 	fmt::print("Main function: {}\n", parsedProgram.mainFunction->name);
 
