@@ -52,29 +52,38 @@ Location locate(std::string_view substring, std::string_view original)
 	return result;
 }
 
-[[noreturn]] void unrecoverableError(std::string_view description,
-	std::string_view errorSubstring,
-	std::string_view fullInput,
-	std::string_view sourceFileName)
+struct ParseInput
 {
-	auto location = locate(errorSubstring, fullInput);
-	throw std::runtime_error(
-		fmt::format("{}({}:{}): {}", sourceFileName, location.lineNumber, location.columnNumber, description));
+	std::string_view current;
+	std::string_view full;
+	std::string_view sourceFileName;
+
+	[[nodiscard]] ParseInput consume(std::size_t offset) const
+	{
+		return { current.substr(offset), full, sourceFileName };
+	}
+};
+
+[[noreturn]] void unrecoverableError(std::string_view description, ParseInput const& errorLocation)
+{
+	auto location = locate(errorLocation.current, errorLocation.full);
+	throw std::runtime_error(fmt::format(
+		"{}({}:{}): {}", errorLocation.sourceFileName, location.lineNumber, location.columnNumber, description));
 }
 
 template<typename Result>
 struct ParseResult
 {
 	bool ok = false;
-	std::string_view remaining;
+	ParseInput remaining;
 	Result result;
 };
 
-ParseResult<std::string_view> parseLiteral(std::string_view input, std::string_view literal)
+ParseResult<std::string_view> parseLiteral(ParseInput const& input, std::string_view literal)
 {
-	if (input.starts_with(literal))
+	if (input.current.starts_with(literal))
 	{
-		return { true, input.substr(literal.size()), input.substr(0, literal.size()) };
+		return { true, input.consume(literal.size()), input.current.substr(0, literal.size()) };
 	}
 	else
 	{
@@ -82,29 +91,29 @@ ParseResult<std::string_view> parseLiteral(std::string_view input, std::string_v
 	}
 }
 
-ParseResult<std::string_view> parseWhitespace(std::string_view input)
+ParseResult<std::string_view> parseWhitespace(ParseInput const& input)
 {
-	auto firstNotWhitespace = input.find_first_not_of(" \t\n");
+	auto firstNotWhitespace = input.current.find_first_not_of(" \t\n");
 	if (firstNotWhitespace == 0 || firstNotWhitespace == std::string_view::npos)
 	{
 		return {};
 	}
 	else
 	{
-		return { true, input.substr(firstNotWhitespace), input.substr(0, firstNotWhitespace) };
+		return { true, input.consume(firstNotWhitespace), input.current.substr(0, firstNotWhitespace) };
 	}
 }
 
-std::string_view skipWhitespace(std::string_view input)
+ParseInput skipWhitespace(ParseInput const& input)
 {
-	auto firstNotWhitespace = input.find_first_not_of(" \t\n");
+	auto firstNotWhitespace = input.current.find_first_not_of(" \t\n");
 	if (firstNotWhitespace == std::string_view::npos)
 	{
-		return input.substr(input.size());
+		return input.consume(input.current.size());
 	}
 	else
 	{
-		return input.substr(firstNotWhitespace);
+		return input.consume(firstNotWhitespace);
 	}
 }
 
@@ -122,28 +131,27 @@ std::string_view trim(std::string_view input)
 	}
 }
 
-ParseResult<std::string_view> parseIdentifier(std::string_view input)
+ParseResult<std::string_view> parseIdentifier(ParseInput const& input)
 {
 	// TODO: Too strict. Replace with black list?
 	constexpr static auto isBasicLetter
 		= [](char letter) { return ('a' <= letter && letter <= 'z') || ('A' <= letter && letter <= 'Z'); };
 	constexpr static auto isDigit = [](char letter) { return '0' <= letter && letter <= '9'; };
 	auto firstNotIdentifierCharIt
-		= std::ranges::find_if_not(input, [](char letter) { return isBasicLetter(letter) || isDigit(letter); });
+		= std::ranges::find_if_not(input.current, [](char letter) { return isBasicLetter(letter) || isDigit(letter); });
 
-	if (firstNotIdentifierCharIt == input.begin() || !isBasicLetter(input.front()))
+	if (firstNotIdentifierCharIt == input.current.begin() || !isBasicLetter(input.current.front()))
 	{
 		return {};
 	}
 	else
 	{
-		auto identifierLength = std::distance(input.begin(), firstNotIdentifierCharIt);
-		return { true, input.substr(identifierLength), input.substr(0, identifierLength) };
+		auto identifierLength = std::distance(input.current.begin(), firstNotIdentifierCharIt);
+		return { true, input.consume(identifierLength), input.current.substr(0, identifierLength) };
 	}
 }
 
-ParseResult<ParameterDirection>
-	parseParameterDirection(std::string_view input, std::string_view fullInput, std::string_view sourceFileName)
+ParseResult<ParameterDirection> parseParameterDirection(ParseInput const& input)
 {
 	auto inLiteral = parseLiteral(input, "in");
 	if (inLiteral.ok)
@@ -163,17 +171,14 @@ ParseResult<ParameterDirection>
 		return { true, inoutLiteral.remaining, ParameterDirection::inout };
 	}
 
-	unrecoverableError("Expected parameter direction", input, fullInput, sourceFileName);
+	unrecoverableError("Expected parameter direction", input);
 }
 
-ParseResult<std::shared_ptr<Type>>
-	parseType(Program& program, std::string_view input, std::string_view fullInput, std::string_view sourceFileName);
+ParseResult<std::shared_ptr<Type>> parseType(Program& program, ParseInput const& input);
 
 ParseResult<FuncType> parseFuncType(// NOLINT(misc-no-recursion)
 	Program& program,
-	std::string_view input,
-	std::string_view fullInput,
-	std::string_view sourceFileName)
+	ParseInput const& input)
 {
 	auto funLiteral = parseLiteral(input, "fun");
 	if (!funLiteral.ok)
@@ -193,58 +198,57 @@ ParseResult<FuncType> parseFuncType(// NOLINT(misc-no-recursion)
 	if (emptyParLiteral.ok)
 	{
 		FuncType funcType;
-		funcType.rep = trim(std::string_view(funWRemInput.data(), emptyParLiteral.remaining.data()));
+		funcType.rep = trim(std::string_view(funWRemInput.current.data(), emptyParLiteral.remaining.current.data()));
 		return { true, skipWhitespace(emptyParLiteral.remaining), funcType };
 	}
 
-	auto direction = parseParameterDirection(openParWRemInput, fullInput, sourceFileName);
+	auto direction = parseParameterDirection(openParWRemInput);
 	if (!direction.ok)
 	{
-		unrecoverableError("Expected parameter direction", openParWRemInput, fullInput, sourceFileName);
+		unrecoverableError("Expected parameter direction", openParWRemInput);
 	}
 
 	auto directionWhitespace = parseWhitespace(direction.remaining);
 	if (!directionWhitespace.ok)
 	{
-		unrecoverableError(
-			"Expected parameter direction followed by whitespace", direction.remaining, fullInput, sourceFileName);
+		unrecoverableError("Expected parameter direction followed by whitespace", direction.remaining);
 	}
 
 	auto parameterName = parseIdentifier(directionWhitespace.remaining);
 	if (!parameterName.ok)
 	{
-		unrecoverableError("Expected parameter name", directionWhitespace.remaining, fullInput, sourceFileName);
+		unrecoverableError("Expected parameter name", directionWhitespace.remaining);
 	}
 	auto parameterWRemInput = skipWhitespace(parameterName.remaining);
 
 	auto colonLiteral = parseLiteral(parameterWRemInput, ":");
 	if (!colonLiteral.ok)
 	{
-		unrecoverableError(
-			"Expected colon between parameter name and type", parameterWRemInput, fullInput, sourceFileName);
+		unrecoverableError("Expected colon between parameter name and type", parameterWRemInput);
 	}
 	auto colonWRemInput = skipWhitespace(colonLiteral.remaining);
 
-	auto parameterType = parseType(program, colonWRemInput, fullInput, sourceFileName);
+	auto parameterType = parseType(program, colonWRemInput);
 	if (!parameterType.ok)
 	{
-		unrecoverableError("Expected parameter type", colonWRemInput, fullInput, sourceFileName);
+		unrecoverableError("Expected parameter type", colonWRemInput);
 	}
 
 	auto additionalParametersLiteral = parseLiteral(parameterType.remaining, ",");
 	if (additionalParametersLiteral.ok)
 	{
-		unrecoverableError("Multiple parameters not implemented", parameterType.remaining, fullInput, sourceFileName);
+		unrecoverableError("Multiple parameters not implemented", parameterType.remaining);
 	}
 
 	auto closeParLiteral = parseLiteral(parameterType.remaining, ")");
 	if (!closeParLiteral.ok)
 	{
-		unrecoverableError("Expected closing parenthesis", parameterType.remaining, fullInput, sourceFileName);
+		unrecoverableError("Expected closing parenthesis", parameterType.remaining);
 	}
 
 	FuncType funcType;
-	funcType.rep = trim(std::string_view(funLiteral.remaining.data(), closeParLiteral.remaining.data()));
+	funcType.rep
+		= trim(std::string_view(funLiteral.remaining.current.data(), closeParLiteral.remaining.current.data()));
 
 	FuncParameter& param = funcType.parameters.emplace_back();
 	param.name = parameterName.result;
@@ -267,31 +271,30 @@ std::shared_ptr<Type> findOrAddType(Program& program, Type&& maybeNewType)
 	return program.types.emplace_back(std::make_shared<Type>(std::move(maybeNewType)));
 }
 
-ParseResult<std::unique_ptr<Expression>>
-	parseTerm(std::string_view input, std::string_view fullInput, std::string_view sourceFileName)
+ParseResult<std::unique_ptr<Expression>> parseTerm(ParseInput const& input)
 {
 	std::int32_t value = -1;
-	auto [ptr, ec] = std::from_chars(input.data(), input.data() + input.size(), value);
+	auto [ptr, ec] = std::from_chars(input.current.data(), input.current.data() + input.current.size(), value);
 	if (ec != std::errc())
 	{
-		unrecoverableError("Expected number term", input, fullInput, sourceFileName);
+		unrecoverableError("Expected number term", input);
 	}
 
-	std::string_view const afterNumber = input.substr(ptr - input.data());
-	if (!afterNumber.starts_with("i32"))
+	auto afterNumber = input.consume(ptr - input.current.data());
+	if (!afterNumber.current.starts_with("i32"))
 	{
-		unrecoverableError("Expected type after value", input, fullInput, sourceFileName);
+		unrecoverableError("Expected type after value", afterNumber);
 	}
 
 	std::unique_ptr<Expression> expression = std::make_unique<Expression>();
-	expression->rep = input.substr(0, ptr - input.data() + 3);
+	expression->rep = input.current.substr(0, ptr - input.current.data() + 3);
 	expression->expr = Literal{ value };
-	return { true, afterNumber.substr(3), std::move(expression) };
+	return { true, afterNumber.consume(3), std::move(expression) };
 }
 
-BinaryOperator parseBinaryOperator(std::string_view input, std::string_view fullInput, std::string_view sourceFileName)
+BinaryOperator parseBinaryOperator(ParseInput const& input)
 {
-	char opChar = input.at(0);
+	char opChar = input.current.at(0);
 	switch (opChar)
 	{
 	case '+':
@@ -305,36 +308,36 @@ BinaryOperator parseBinaryOperator(std::string_view input, std::string_view full
 	case '%':
 		return BinaryOperator::modulo;
 	default:
-		unrecoverableError(fmt::format("Unknown binary operator: {}", opChar), input, fullInput, sourceFileName);
+		unrecoverableError(fmt::format("Unknown binary operator: {}", opChar), input);
 	}
 }
 
-ParseResult<std::unique_ptr<Expression>>
-	parseExpressionTerms(std::string_view input, std::string_view fullInput, std::string_view sourceFileName)
+ParseResult<std::unique_ptr<Expression>> parseExpressionTerms(ParseInput const& input)
 {
-	auto firstTerm = parseTerm(input, fullInput, sourceFileName);
+	auto firstTerm = parseTerm(input);
 	if (!firstTerm.ok)
 	{
-		unrecoverableError("Expected an expression term", input, fullInput, sourceFileName);
+		unrecoverableError("Expected an expression term", input);
 	}
 	auto currentHead = std::move(firstTerm.result);
 	auto currentRemainingInput = skipWhitespace(firstTerm.remaining);
 
-	while (!currentRemainingInput.empty()
-		   && (currentRemainingInput[0] == '+' || currentRemainingInput[0] == '-' || currentRemainingInput[0] == '*'
-			   || currentRemainingInput[0] == '/' || currentRemainingInput[0] == '%'))
+	while (!currentRemainingInput.current.empty()
+		   && (currentRemainingInput.current[0] == '+' || currentRemainingInput.current[0] == '-'
+			   || currentRemainingInput.current[0] == '*' || currentRemainingInput.current[0] == '/'
+			   || currentRemainingInput.current[0] == '%'))
 	{
-		BinaryOperator const binaryOperator = parseBinaryOperator(currentRemainingInput, fullInput, sourceFileName);
+		BinaryOperator const binaryOperator = parseBinaryOperator(currentRemainingInput);
 
-		std::string_view const tail = skipWhitespace(currentRemainingInput.substr(1));
-		auto nextTerm = parseTerm(tail, fullInput, sourceFileName);
+		auto tail = skipWhitespace(currentRemainingInput.consume(1));
+		auto nextTerm = parseTerm(tail);
 		if (!nextTerm.ok)
 		{
-			unrecoverableError("Expected a right-hand side term for binary operator", tail, fullInput, sourceFileName);
+			unrecoverableError("Expected a right-hand side term for binary operator", tail);
 		}
 
 		std::unique_ptr<Expression> binaryOpExpression = std::make_unique<Expression>();
-		binaryOpExpression->rep = trim(std::string_view(input.data(), nextTerm.remaining.data()));
+		binaryOpExpression->rep = trim(std::string_view(input.current.data(), nextTerm.remaining.current.data()));
 		binaryOpExpression->expr = BinaryOpExpression{ binaryOperator, std::move(currentHead), std::move(nextTerm.result) };
 
 		std::swap(currentHead, binaryOpExpression);
@@ -344,39 +347,38 @@ ParseResult<std::unique_ptr<Expression>>
 	return { true, currentRemainingInput, std::move(currentHead) };
 }
 
-ParseResult<Expression>
-	parseExpression(std::string_view input, std::string_view fullInput, std::string_view sourceFileName)
+ParseResult<Expression> parseExpression(ParseInput const& input)
 {
 	auto varIdentifier = parseIdentifier(input);
 	if (!varIdentifier.ok)
 	{
-		unrecoverableError("Expected identifier at start of expression", input, fullInput, sourceFileName);
+		unrecoverableError("Expected identifier at start of expression", input);
 	}
 	auto identifierWRemInput = skipWhitespace(varIdentifier.remaining);
 
-	if (!identifierWRemInput.starts_with('='))
+	if (!identifierWRemInput.current.starts_with('='))
 	{
-		unrecoverableError("Expected assignment after var", identifierWRemInput, fullInput, sourceFileName);
+		unrecoverableError("Expected assignment after var", identifierWRemInput);
 	}
-	auto assignmentWRemInput = skipWhitespace(identifierWRemInput.substr(1));
+	auto assignmentWRemInput = skipWhitespace(identifierWRemInput.consume(1));
 
-	auto valueExpr = parseExpressionTerms(assignmentWRemInput, fullInput, sourceFileName);
+	auto valueExpr = parseExpressionTerms(assignmentWRemInput);
 	if (!valueExpr.ok)
 	{
-		unrecoverableError("Failed to parse expression terms", assignmentWRemInput, fullInput, sourceFileName);
+		unrecoverableError("Failed to parse expression terms", assignmentWRemInput);
 	}
-	if (!valueExpr.remaining.starts_with(';'))
+	if (!valueExpr.remaining.current.starts_with(';'))
 	{
-		unrecoverableError("Expected assignment to be followed by ';'", valueExpr.remaining, fullInput, sourceFileName);
+		unrecoverableError("Expected assignment to be followed by ';'", valueExpr.remaining);
 	}
-	auto leftOver = valueExpr.remaining.substr(1);
+	auto leftOver = valueExpr.remaining.consume(1);
 
 	InitAssignment initAssignment;
 	initAssignment.var = varIdentifier.result;
 	initAssignment.value = std::move(valueExpr.result);
 
 	Expression expr;
-	expr.rep = trim(std::string_view(input.data(), leftOver.data()));
+	expr.rep = trim(std::string_view(input.current.data(), leftOver.current.data()));
 	expr.expr = std::move(initAssignment);
 
 	return { true, skipWhitespace(leftOver), std::move(expr) };
@@ -412,15 +414,13 @@ bool isMainFuncType(Type const& type)
 
 ParseResult<std::shared_ptr<Type>> parseType(// NOLINT(misc-no-recursion)
 	Program& program,
-	std::string_view input,
-	std::string_view fullInput,
-	std::string_view sourceFileName)
+	ParseInput const& input)
 {
-	auto funcType = parseFuncType(program, input, fullInput, sourceFileName);
+	auto funcType = parseFuncType(program, input);
 	if (funcType.ok)
 	{
 		Type maybeNewType;
-		maybeNewType.rep = trim(std::string_view(input.data(), funcType.remaining.data()));
+		maybeNewType.rep = trim(std::string_view(input.current.data(), funcType.remaining.current.data()));
 		maybeNewType.t = funcType.result;
 
 		std::shared_ptr<Type> const& type = findOrAddType(program, std::move(maybeNewType));
@@ -441,40 +441,39 @@ ParseResult<std::shared_ptr<Type>> parseType(// NOLINT(misc-no-recursion)
 		}
 		else
 		{
-			unrecoverableError(fmt::format("Type not implemented: {}", plainType.result), input, fullInput, sourceFileName);
+			unrecoverableError(fmt::format("Type not implemented: {}", plainType.result), input);
 		}
 	}
 
-	unrecoverableError("Expected type", input, fullInput, sourceFileName);
+	unrecoverableError("Expected type", input);
 }
 
-ParseResult<Expression>
-	parseFunctionBody(std::string_view input, std::string_view fullInput, std::string_view sourceFileName)
+ParseResult<Expression> parseFunctionBody(ParseInput const& input)
 {
-	if (!input.starts_with('{'))
+	if (!input.current.starts_with('{'))
 	{
-		unrecoverableError("Missing '{' at start of function", input, fullInput, sourceFileName);
+		unrecoverableError("Missing '{' at start of function", input);
 	}
 
 	std::vector<Expression> expressions;
-	auto remainingInput = skipWhitespace(input.substr(1));
-	while (!remainingInput.empty() && !remainingInput.starts_with('}'))
+	auto remainingInput = skipWhitespace(input.consume(1));
+	while (!remainingInput.current.empty() && !remainingInput.current.starts_with('}'))
 	{
-		auto expression = parseExpression(remainingInput, fullInput, sourceFileName);
+		auto expression = parseExpression(remainingInput);
 		if (!expression.ok)
 		{
-			unrecoverableError("Expected an expression in function body", remainingInput, fullInput, sourceFileName);
+			unrecoverableError("Expected an expression in function body", remainingInput);
 		}
 		expressions.push_back(std::move(expression.result));
 		remainingInput = expression.remaining;
 	}
 
-	if (!remainingInput.starts_with('}'))
+	if (!remainingInput.current.starts_with('}'))
 	{
-		unrecoverableError("Missing '}' at end of function", remainingInput, fullInput, sourceFileName);
+		unrecoverableError("Missing '}' at end of function", remainingInput);
 	}
 
-	auto leftOverInput = skipWhitespace(remainingInput.substr(1));
+	auto leftOverInput = skipWhitespace(remainingInput.consume(1));
 
 	if (expressions.size() == 1)
 	{
@@ -483,64 +482,61 @@ ParseResult<Expression>
 	else if (expressions.empty())
 	{
 		// TODO: Implement empty function body
-		unrecoverableError("Empty function body not implemented", remainingInput, fullInput, sourceFileName);
+		unrecoverableError("Empty function body not implemented", remainingInput);
 	}
 	else
 	{
 		// TODO: Implement function body with multiple expressions
-		unrecoverableError("Function body with multiple expressions not implemented", input, fullInput, sourceFileName);
+		unrecoverableError("Function body with multiple expressions not implemented", input);
 	}
 }
 
-ParseResult<std::shared_ptr<Function>> parseDefinition(std::string_view input,
-	Program& program,
-	std::string_view fullInput,
-	std::string_view sourceFileName)
+ParseResult<std::shared_ptr<Function>> parseDefinition(Program& program, ParseInput const& input)
 {
 	auto lineWRemInput = skipWhitespace(input);
 	auto defLiteral = parseLiteral(lineWRemInput, "def");
 	auto defWhitespace = parseWhitespace(defLiteral.remaining);
 	if (!defLiteral.ok || !defWhitespace.ok)
 	{
-		unrecoverableError("Invalid syntax", input, fullInput, sourceFileName);
+		unrecoverableError("Invalid syntax", input);
 	}
 
 	auto defIdentifier = parseIdentifier(defWhitespace.remaining);
 	if (!defIdentifier.ok)
 	{
-		unrecoverableError("Missing name after def", defWhitespace.remaining, fullInput, sourceFileName);
+		unrecoverableError("Missing name after def", defWhitespace.remaining);
 	}
 	auto identifierWRemInput = skipWhitespace(defIdentifier.remaining);
 
 	auto assignmentLiteral = parseLiteral(identifierWRemInput, "=");
 	if (!assignmentLiteral.ok)
 	{
-		unrecoverableError("Missing assignment in def", identifierWRemInput, fullInput, sourceFileName);
+		unrecoverableError("Missing assignment in def", identifierWRemInput);
 	}
 	auto assignmentWRemInput = skipWhitespace(assignmentLiteral.remaining);
 
-	auto type = parseType(program, assignmentWRemInput, fullInput, sourceFileName);
+	auto type = parseType(program, assignmentWRemInput);
 	if (!type.ok)
 	{
-		unrecoverableError("Unable to parse type", assignmentWRemInput, input, sourceFileName);
+		unrecoverableError("Unable to parse type", assignmentWRemInput);
 	}
 
-	auto functionBody = parseFunctionBody(type.remaining, fullInput, sourceFileName);
+	auto functionBody = parseFunctionBody(type.remaining);
 	if (!functionBody.ok)
 	{
-		unrecoverableError("Failed to parse function body", type.remaining, fullInput, sourceFileName);
+		unrecoverableError("Failed to parse function body", type.remaining);
 	}
 	auto funcBodyWRemInput = skipWhitespace(functionBody.remaining);
 
-	if (!funcBodyWRemInput.starts_with(';'))
+	if (!funcBodyWRemInput.current.starts_with(';'))
 	{
-		unrecoverableError("Invalid def end", funcBodyWRemInput, fullInput, sourceFileName);
+		unrecoverableError("Invalid def end", funcBodyWRemInput);
 	}
-	auto remainingInput = skipWhitespace(funcBodyWRemInput.substr(1));
+	auto remainingInput = skipWhitespace(funcBodyWRemInput.consume(1));
 
 	std::shared_ptr<Function> const& mainFunc = program.functions.emplace_back(std::make_shared<Function>());
 	mainFunc->name = defIdentifier.result;
-	mainFunc->sourceFile = sourceFileName;
+	mainFunc->sourceFile = input.sourceFileName;
 	mainFunc->type = type.result;
 	mainFunc->expression = std::move(functionBody.result);
 
@@ -548,12 +544,12 @@ ParseResult<std::shared_ptr<Function>> parseDefinition(std::string_view input,
 	{
 		if (!isMainFuncType(*mainFunc->type))
 		{
-			unrecoverableError("Wrong type for main", assignmentWRemInput, fullInput, sourceFileName);
+			unrecoverableError("Wrong type for main", assignmentWRemInput);
 		}
 
 		if (program.mainFunction)
 		{
-			unrecoverableError("Multiple main functions found", defWhitespace.remaining, fullInput, sourceFileName);
+			unrecoverableError("Multiple main functions found", defWhitespace.remaining);
 		}
 
 		program.mainFunction = mainFunc;
@@ -566,13 +562,13 @@ Program parse(std::string_view input, std::string_view name)
 {
 	Program program;
 
-	std::string_view remainingInput = input;
-	while (!remainingInput.empty())
+	ParseInput remainingInput{ input, input, name };
+	while (!remainingInput.current.empty())
 	{
-		auto funcDef = parseDefinition(remainingInput, program, input, name);
+		auto funcDef = parseDefinition(program, remainingInput);
 		if (!funcDef.ok)
 		{
-			unrecoverableError("Failed to parse definition", remainingInput, input, name);
+			unrecoverableError("Failed to parse definition", remainingInput);
 		}
 		remainingInput = funcDef.remaining;
 	}
