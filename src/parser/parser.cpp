@@ -271,7 +271,7 @@ std::shared_ptr<Type> findOrAddType(Program& program, Type&& maybeNewType)
 	return program.types.emplace_back(std::make_shared<Type>(std::move(maybeNewType)));
 }
 
-ParseResult<std::unique_ptr<Expression>> parseTerm(ParseInput const& input)
+ParseResult<std::unique_ptr<Expression>> parseNumberWithType(ParseInput const& input)
 {
 	std::int32_t value = -1;
 	auto [ptr, ec] = std::from_chars(input.current.data(), input.current.data() + input.current.size(), value);
@@ -290,6 +290,33 @@ ParseResult<std::unique_ptr<Expression>> parseTerm(ParseInput const& input)
 	expression->rep = input.current.substr(0, ptr - input.current.data() + 3);
 	expression->expr = Literal{ value };
 	return { true, afterNumber.consume(3), std::move(expression) };
+}
+
+ParseResult<std::unique_ptr<Expression>> parseExpressionTerms(ParseInput const& input);
+
+ParseResult<std::unique_ptr<Expression>> parseTerm(ParseInput const& input) // NOLINT(misc-no-recursion)
+{
+	auto parStart = parseLiteral(input, "(");
+	if (parStart.ok)
+	{
+		auto innerExpr = parseExpressionTerms(skipWhitespace(parStart.remaining));
+		if (!innerExpr.ok)
+		{
+			unrecoverableError("Expected inner expression", parStart.remaining);
+		}
+
+		auto parEnd = parseLiteral(innerExpr.remaining, ")");
+		if (!parEnd.ok)
+		{
+			unrecoverableError("Expected closing parenthesis", innerExpr.remaining);
+		}
+
+		return { true, parEnd.remaining, std::move(innerExpr.result) };
+	}
+	else
+	{
+		return parseNumberWithType(input);
+	}
 }
 
 BinaryOperator parseBinaryOperator(ParseInput const& input)
@@ -312,7 +339,7 @@ BinaryOperator parseBinaryOperator(ParseInput const& input)
 	}
 }
 
-ParseResult<std::unique_ptr<Expression>> parseExpressionTerms(ParseInput const& input)
+ParseResult<std::unique_ptr<Expression>> parseExpressionTerms(ParseInput const& input) // NOLINT(misc-no-recursion)
 {
 	auto firstTerm = parseTerm(input);
 	if (!firstTerm.ok)
