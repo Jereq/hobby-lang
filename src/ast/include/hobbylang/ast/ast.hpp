@@ -80,10 +80,32 @@ struct BinaryOpExpression
 	std::unique_ptr<Expression> rhs;
 };
 
+struct FuncArgument;
+
+struct FunctionCall
+{
+	std::string functionName;
+	// TODO: scope
+	std::vector<FuncArgument> arguments;
+};
+
+struct VarExpression
+{
+	std::string varName;
+	// TODO: scope
+};
+
 struct Expression
 {
 	std::string rep;// TODO: Replace
-	std::variant<Literal, InitAssignment, BinaryOpExpression> expr;
+	std::variant<Literal, InitAssignment, BinaryOpExpression, FunctionCall, VarExpression> expr;
+};
+
+struct FuncArgument
+{
+	std::string name;
+	ParameterDirection direction;
+	Expression expr;
 };
 
 struct Function

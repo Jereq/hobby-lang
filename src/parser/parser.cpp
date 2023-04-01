@@ -176,36 +176,12 @@ ParseResult<ParameterDirection> parseParameterDirection(ParseInput const& input)
 
 ParseResult<std::shared_ptr<Type>> parseType(Program& program, ParseInput const& input);
 
-ParseResult<FuncType> parseFuncType(// NOLINT(misc-no-recursion)
-	Program& program,
-	ParseInput const& input)
+ParseResult<FuncParameter> parseFuncTypeParameter(Program& program, ParseInput const& input) // NOLINT(misc-no-recursion)
 {
-	auto funLiteral = parseLiteral(input, "fun");
-	if (!funLiteral.ok)
-	{
-		return {};
-	}
-	auto funWRemInput = skipWhitespace(funLiteral.remaining);
-
-	auto openParLiteral = parseLiteral(funWRemInput, "(");
-	if (!openParLiteral.ok)
-	{
-		return {};
-	}
-	auto openParWRemInput = skipWhitespace(openParLiteral.remaining);
-
-	auto emptyParLiteral = parseLiteral(openParWRemInput, ")");
-	if (emptyParLiteral.ok)
-	{
-		FuncType funcType;
-		funcType.rep = trim(std::string_view(funWRemInput.current.data(), emptyParLiteral.remaining.current.data()));
-		return { true, skipWhitespace(emptyParLiteral.remaining), funcType };
-	}
-
-	auto direction = parseParameterDirection(openParWRemInput);
+	auto direction = parseParameterDirection(input);
 	if (!direction.ok)
 	{
-		unrecoverableError("Expected parameter direction", openParWRemInput);
+		unrecoverableError("Expected parameter direction", input);
 	}
 
 	auto directionWhitespace = parseWhitespace(direction.remaining);
@@ -234,26 +210,68 @@ ParseResult<FuncType> parseFuncType(// NOLINT(misc-no-recursion)
 		unrecoverableError("Expected parameter type", colonWRemInput);
 	}
 
-	auto additionalParametersLiteral = parseLiteral(parameterType.remaining, ",");
-	if (additionalParametersLiteral.ok)
+	return { true,
+		skipWhitespace(parameterType.remaining),
+		FuncParameter{ std::string(parameterName.result), direction.result, parameterType.result } };
+}
+
+ParseResult<FuncType> parseFuncType(// NOLINT(misc-no-recursion)
+	Program& program,
+	ParseInput const& input)
+{
+	auto funLiteral = parseLiteral(input, "fun");
+	if (!funLiteral.ok)
 	{
-		unrecoverableError("Multiple parameters not implemented", parameterType.remaining);
+		return {};
+	}
+	auto funWRemInput = skipWhitespace(funLiteral.remaining);
+
+	auto openParLiteral = parseLiteral(funWRemInput, "(");
+	if (!openParLiteral.ok)
+	{
+		return {};
+	}
+	auto openParWRemInput = skipWhitespace(openParLiteral.remaining);
+
+	auto emptyParLiteral = parseLiteral(openParWRemInput, ")");
+	if (emptyParLiteral.ok)
+	{
+		FuncType funcType;
+		funcType.rep = trim(std::string_view(funWRemInput.current.data(), emptyParLiteral.remaining.current.data()));
+		return { true, skipWhitespace(emptyParLiteral.remaining), funcType };
 	}
 
-	auto closeParLiteral = parseLiteral(parameterType.remaining, ")");
+	auto firstParameter = parseFuncTypeParameter(program, openParWRemInput);
+	if (!firstParameter.ok)
+	{
+		unrecoverableError("Expected function parameter", openParWRemInput);
+	}
+	std::vector parameters = { firstParameter.result };
+
+	auto currentInput = firstParameter.remaining;
+	for (auto parameterSeparator = parseLiteral(currentInput, ","); parameterSeparator.ok;
+		 parameterSeparator = parseLiteral(currentInput, ","))
+	{
+		auto parameterSeparatorWRemInput = skipWhitespace(parameterSeparator.remaining);
+		auto parameter = parseFuncTypeParameter(program, parameterSeparatorWRemInput);
+		if (!parameter.ok)
+		{
+			unrecoverableError("Expected function parameter", parameterSeparatorWRemInput);
+		}
+		parameters.push_back(std::move(parameter.result));
+		currentInput = parameter.remaining;
+	}
+
+	auto closeParLiteral = parseLiteral(currentInput, ")");
 	if (!closeParLiteral.ok)
 	{
-		unrecoverableError("Expected closing parenthesis", parameterType.remaining);
+		unrecoverableError("Expected closing parenthesis", currentInput);
 	}
 
 	FuncType funcType;
 	funcType.rep
 		= trim(std::string_view(funLiteral.remaining.current.data(), closeParLiteral.remaining.current.data()));
-
-	FuncParameter& param = funcType.parameters.emplace_back();
-	param.name = parameterName.result;
-	param.direction = direction.result;
-	param.type = parameterType.result;
+	funcType.parameters = std::move(parameters);
 
 	return { true, skipWhitespace(closeParLiteral.remaining), std::move(funcType) };
 }
@@ -269,6 +287,20 @@ std::shared_ptr<Type> findOrAddType(Program& program, Type&& maybeNewType)
 	}
 
 	return program.types.emplace_back(std::make_shared<Type>(std::move(maybeNewType)));
+}
+
+ParseResult<std::unique_ptr<Expression>> parseVarExpression(ParseInput const& input)
+{
+	auto varIdentifier = parseIdentifier(input);
+	if (!varIdentifier.ok)
+	{
+		return {};
+	}
+
+	std::unique_ptr<Expression> expression = std::make_unique<Expression>();
+	expression->rep = varIdentifier.result;
+	expression->expr = VarExpression{ std::string(varIdentifier.result) };
+	return { true, skipWhitespace(varIdentifier.remaining), std::move(expression) };
 }
 
 ParseResult<std::unique_ptr<Expression>> parseNumberWithType(ParseInput const& input)
@@ -294,6 +326,86 @@ ParseResult<std::unique_ptr<Expression>> parseNumberWithType(ParseInput const& i
 
 ParseResult<std::unique_ptr<Expression>> parseExpressionTerms(ParseInput const& input);
 
+ParseResult<std::unique_ptr<Expression>> parseFunctionCall(ParseInput const& input) // NOLINT(misc-no-recursion)
+{
+	auto funcName = parseIdentifier(input);
+	if (!funcName.ok)
+	{
+		return {};
+	}
+
+	auto parStart = parseLiteral(skipWhitespace(funcName.remaining), "(");
+	if (!parStart.ok)
+	{
+		return {};
+	}
+	auto parStartWRemInput = skipWhitespace(parStart.remaining);
+
+	auto emptyParLiteral = parseLiteral(parStartWRemInput, ")");
+	if (emptyParLiteral.ok)
+	{
+		std::unique_ptr<Expression> expression = std::make_unique<Expression>();
+		expression->rep = std::string_view(input.current.data(), emptyParLiteral.remaining.current.data());
+		expression->expr = FunctionCall{ std::string(funcName.result), {} };
+		return { true, skipWhitespace(emptyParLiteral.remaining), std::move(expression) };
+	}
+
+	auto direction = parseParameterDirection(parStartWRemInput);
+	if (!direction.ok)
+	{
+		unrecoverableError("Expected parameter direction", parStartWRemInput);
+	}
+
+	auto directionWhitespace = parseWhitespace(direction.remaining);
+	if (!directionWhitespace.ok)
+	{
+		unrecoverableError("Expected parameter direction followed by whitespace", direction.remaining);
+	}
+
+	auto parameterName = parseIdentifier(directionWhitespace.remaining);
+	if (!parameterName.ok)
+	{
+		unrecoverableError("Expected parameter name", directionWhitespace.remaining);
+	}
+	auto parameterWRemInput = skipWhitespace(parameterName.remaining);
+
+	auto colonLiteral = parseLiteral(parameterWRemInput, ":");
+	if (!colonLiteral.ok)
+	{
+		unrecoverableError("Expected colon between parameter name and value", parameterWRemInput);
+	}
+	auto colonLiteralWRemInput = skipWhitespace(colonLiteral.remaining);
+
+	auto argumentExpr = parseExpressionTerms(colonLiteralWRemInput);
+	if (!argumentExpr.ok)
+	{
+		unrecoverableError("Expected argument expression", colonLiteralWRemInput);
+	}
+
+	auto additionalParametersLiteral = parseLiteral(argumentExpr.remaining, ",");
+	if (additionalParametersLiteral.ok)
+	{
+		unrecoverableError("Multiple arguments not implemented", argumentExpr.remaining);
+	}
+
+	auto closeParLiteral = parseLiteral(argumentExpr.remaining, ")");
+	if (!closeParLiteral.ok)
+	{
+		unrecoverableError("Expected closing parenthesis", argumentExpr.remaining);
+	}
+
+	std::vector<FuncArgument> arguments;
+	FuncArgument& arg = arguments.emplace_back();
+	arg.name = parameterName.result;
+	arg.direction = direction.result;
+	arg.expr = std::move(*argumentExpr.result);
+
+	std::unique_ptr<Expression> expression = std::make_unique<Expression>();
+	expression->rep = std::string_view(input.current.data(), closeParLiteral.remaining.current.data());
+	expression->expr = FunctionCall{ std::string(funcName.result), std::move(arguments) };
+	return { true, skipWhitespace(closeParLiteral.remaining), std::move(expression) };
+}
+
 ParseResult<std::unique_ptr<Expression>> parseTerm(ParseInput const& input) // NOLINT(misc-no-recursion)
 {
 	auto parStart = parseLiteral(input, "(");
@@ -313,10 +425,20 @@ ParseResult<std::unique_ptr<Expression>> parseTerm(ParseInput const& input) // N
 
 		return { true, parEnd.remaining, std::move(innerExpr.result) };
 	}
-	else
+
+	auto functionCallExpr = parseFunctionCall(input);
+	if (functionCallExpr.ok)
 	{
-		return parseNumberWithType(input);
+		return functionCallExpr;
 	}
+
+	auto varExpression = parseVarExpression(input);
+	if (varExpression.ok)
+	{
+		return varExpression;
+	}
+
+	return parseNumberWithType(input);
 }
 
 BinaryOperator parseBinaryOperator(ParseInput const& input)

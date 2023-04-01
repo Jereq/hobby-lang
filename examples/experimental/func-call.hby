@@ -1,0 +1,9 @@
+def main = fun(out exitCode: i32)
+{
+    exitCode = square(in x: 3i32);
+};
+
+def square = fun(in x: i32, out result: i32)
+{
+    result = x * x;
+};
